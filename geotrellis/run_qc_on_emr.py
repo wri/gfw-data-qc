@@ -18,12 +18,12 @@ SUBMIT_EMR_JOB_LAMBDA = "datapump-submit_job-default"
 
 
 @click.command()
-@click.option("geotrellis_jar_path", default=None)
-@click.argument("output_path", default=f"s3://{PIPELINES_BUCKET}/geotrellis/results/qc/{CURR_DATETIME}")
+@click.option("--geotrellis_jar_path", default=None)
+@click.option("--output_path", default=f"s3://{PIPELINES_BUCKET}/geotrellis/results/qc/{CURR_DATETIME}")
 def run_qc_on_emr(geotrellis_jar_path, output_path):
     payload = {
         "instance_count": 5,
-        "feature_src": "path/to/qc/features",
+        "feature_src": QC_AREAS_PATH,
         "feature_type": "geostore",
         "analyses": ["gladalerts", "annualupdate_minimal", "firealerts"],
         "name": f"geotrellis-qc-{CURR_DATETIME}",
@@ -44,8 +44,6 @@ def run_qc_on_emr(geotrellis_jar_path, output_path):
     )
 
     response_payload = json.loads(response['Payload'].read().decode())
-    print(response_payload)
-
     if response_payload["status"] == "SUCCESS":
         print("EMR job successfully started! See EMR dashboard for progress.")
         print(f"Job Flow ID: {response_payload['job_flow_id']}")
