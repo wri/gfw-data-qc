@@ -4,5 +4,8 @@
 # external requirements
 click
 pandas
+geopandas
 numpy
 awscli
+boto3
+shapely
