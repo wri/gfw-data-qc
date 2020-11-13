@@ -110,7 +110,7 @@ for year in tqdm(range(1,20)):
         tcl_arr_year_area,
         stats='sum',
         affine=win_affine,
-        all_touched=True,
+        all_touched=False,
         nodata=-999
     )
     # log
