@@ -44,9 +44,9 @@ def concatenate_windows(win_arrs, X_list, Y_list):
             axis=0
         )
     # otherwise, concatenate on one axis
-    elif (len(X_list) > 1) and (len(Y_list) == 0):
+    elif (len(X_list) > 1) and (len(Y_list) == 1):
         win_arr = np.concatenate((win_arrs[0], win_arrs[1]), axis=0)
-    elif (len(X_list) > 1) and (len(Y_list) == 0):
+    elif (len(X_list) == 1) and (len(Y_list) > 1):
         win_arr = np.concatenate((win_arrs[0], win_arrs[1]), axis=1)
     else:
         win_arr = win_arrs[0]
