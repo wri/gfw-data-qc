@@ -22,13 +22,19 @@ def parse_bounds(bounds):
         if bounds[0] > 0:
             X = "{:03d}E".format(X)
         else:
-            X = "{:03d}W".format(X * -1)
+            if bounds [0] > -10:
+                X = "{:03d}E".format(X * -1)
+            else:
+                X = "{:03d}W".format(X * -1)
         X_list.append(X)
     for Y in Ys:
         if bounds[1] > 0:
             Y = "{:02d}N".format(Y)
         else:
-            Y = "{:02d}S".format(Y * -1)
+            if bounds[1] > -10:
+                Y = "{:02d}N".format(Y)
+            else:
+                Y = "{:02d}S".format(Y * -1)
         Y_list.append(Y)
 
     return X_list, Y_list

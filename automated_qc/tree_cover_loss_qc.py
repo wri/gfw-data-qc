@@ -5,6 +5,8 @@ import rasterio as rio
 import fiona
 import pandas as pd
 import argparse
+import requests
+import geopandas as gpd
 from utils import parse_bounds, concatenate_windows
 from tqdm import tqdm
 from rasterio.windows import from_bounds
@@ -14,14 +16,59 @@ from rasterstats import zonal_stats
 parser = argparse.ArgumentParser(description='Calculate tree cover loss for admin area')
 parser.add_argument('--admin_area', type=str, help='path to admin area shapefile')
 parser.add_argument('--treecover_threshold', type=int, help='percent threshold for tree cover loss')
+parser.add_argument('--intersections', type=str, help='contextual layers to intersect with admin area')
+parser.add_argument('--output_directory', type=str, help='path to output directory for tree_cover_loss_ha.csv and dissolved_intersection.shp')
 args = parser.parse_args()
 shp_fp = args.admin_area
 treecover_threshold = args.treecover_threshold
+contextual_layers = args.intersections.split(' ')
+OUT_DIR = args.output_directory
+
+# create directories
+if not os.path.exists(OUT_DIR):
+    os.mkdir(OUT_DIR)
+
+if not os.path.exists('tmp'):
+    os.mkdir('tmp')
 
 # get admin area bounds
 with fiona.open(shp_fp) as src:
     bounds = src.bounds
 X_list, Y_list = parse_bounds(bounds)
+
+# intersect and dissolve admin area with contextual layers
+def get_s3_asset_uri(dataset):
+    res = requests.get(f'https://data-api.globalforestwatch.org/dataset/{dataset}/latest/assets?asset_type=ESRI Shapefile')
+    return res.json()['data'][0]['asset_uri']
+
+def intersect_layers(layers, bounds, shp_fp):
+    # parse for s3 paths
+    s3_paths = [get_s3_asset_uri(layer) for layer in layers]
+    # read contextual layers within bounds of admin area
+    contextual_gdfs = []
+    for s3_path in s3_paths:
+        gdf = gpd.read_file(
+            filename=f'zip+{s3_path}',
+            bbox=bounds
+        )
+        contextual_gdfs.append(gdf)
+    # intersect all layers
+    print('Intersecting contextual layer(s) and admin area')
+    intersected_gdf = gpd.read_file(shp_fp)
+    for contextual_gdf in contextual_gdfs:
+        try:
+            intersected_gdf = gpd.overlay(intersected_gdf, contextual_gdf, how='intersection')
+        except:
+            continue
+    # dissolve and save to tmp
+    print('Dissolving intersected features')
+    dissolved = gpd.GeoSeries(intersected_gdf.geometry).unary_union
+    dissolved_gs = gpd.GeoSeries(dissolved)
+    dissolved_gs.to_file(os.path.join('tmp', 'dissolved_intersection.shp'))
+
+    return dissolved
+
+intersection = intersect_layers(contextual_layers, bounds, shp_fp)
 
 # threshold tree cover density
 print('Extracting tree cover density tile(s)')
@@ -106,7 +153,7 @@ for year in tqdm(range(1,20)):
     tcl_arr_year_area = np.multiply(area_mask, tcl_arr_year) / 10000
     # compute zonal stats for admin area
     zstats = zonal_stats(
-        shp_fp,
+        os.path.join('tmp', 'dissolved_intersection.shp'),
         tcl_arr_year_area,
         stats='sum',
         affine=win_affine,
@@ -125,8 +172,8 @@ print(loss_df)
 
 # save to CSV
 loss_df.to_csv(os.path.join(
-    os.getcwd(),
+    OUT_DIR,
     f'{os.path.basename(shp_fp[:-4])}_tree_cover_loss_ha.csv'),
     index_label='year'
 )
-print(f'Saved to {os.path.basename(shp_fp[:-4])}_tree_cover_loss_ha.csv')
+print(f'Saved to {OUT_DIR}/{os.path.basename(shp_fp[:-4])}_tree_cover_loss_ha.csv')
