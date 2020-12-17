@@ -7,7 +7,7 @@ import pandas as pd
 import argparse
 import requests
 import geopandas as gpd
-from utils import parse_bounds, concatenate_windows
+from utils import parse_bounds, concatenate_windows, get_s3_asset_uri
 from tqdm import tqdm
 from rasterio.windows import from_bounds
 from rasterstats import zonal_stats
@@ -36,12 +36,16 @@ with fiona.open(shp_fp) as src:
     bounds = src.bounds
 X_list, Y_list = parse_bounds(bounds)
 
-# intersect and dissolve admin area with contextual layers
-def get_s3_asset_uri(dataset):
-    res = requests.get(f'https://data-api.globalforestwatch.org/dataset/{dataset}/latest/assets?asset_type=ESRI Shapefile')
-    return res.json()['data'][0]['asset_uri']
-
 def intersect_layers(layers, bounds, shp_fp):
+   
+    # return dissolved shapefile if there are no contextual layers
+    if len(contextual_layers) == 0:
+        adm_shp = gpd.read_file(shp_fp)
+        dissolved = gpd.GeoSeries(adm_shp.geometry).unary_union
+        dissolved_gs = gpd.GeoSeries(dissolved)
+        dissolved_gs.to_file(os.path.join('tmp', 'dissolved_intersection.shp'))
+        
+        return dissolved
     # parse for s3 paths
     s3_paths = [get_s3_asset_uri(layer) for layer in layers]
     # read contextual layers within bounds of admin area
