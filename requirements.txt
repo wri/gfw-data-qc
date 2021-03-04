@@ -9,3 +9,8 @@ numpy
 awscli
 boto3
 shapely
+tqdm
+matplotlib
+fiona
+rasterio
+rasterstats
