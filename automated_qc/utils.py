@@ -19,22 +19,16 @@ def parse_bounds(bounds):
     # convert to string
     X_list, Y_list = [], []
     for X in Xs:
-        if bounds[0] > 0:
+        if bounds[0] > -10:
             X = "{:03d}E".format(X)
         else:
-            if bounds [0] > -10:
-                X = "{:03d}E".format(X * -1)
-            else:
-                X = "{:03d}W".format(X * -1)
+            X = "{:03d}W".format(X * -1)
         X_list.append(X)
     for Y in Ys:
-        if bounds[1] > 0:
+        if bounds[1] > -10:
             Y = "{:02d}N".format(Y)
         else:
-            if bounds[1] > -10:
-                Y = "{:02d}N".format(Y)
-            else:
-                Y = "{:02d}S".format(Y * -1)
+            Y = "{:02d}S".format(Y * -1)
         Y_list.append(Y)
 
     return X_list, Y_list
@@ -58,3 +52,7 @@ def concatenate_windows(win_arrs, X_list, Y_list):
         win_arr = win_arrs[0]
 
     return win_arr
+
+def get_s3_asset_uri(dataset):
+    res = requests.get(f'https://data-api.globalforestwatch.org/dataset/{dataset}/latest/assets?asset_type=ESRI Shapefile')
+    return res.json()['data'][0]['asset_uri']
