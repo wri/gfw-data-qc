@@ -14,15 +14,17 @@ from rasterstats import zonal_stats
 
 # parse arguments
 parser = argparse.ArgumentParser(description='Calculate tree cover loss for admin area')
-parser.add_argument('--admin_area', type=str, help='path to admin area shapefile')
-parser.add_argument('--treecover_threshold', type=int, help='percent threshold for tree cover loss')
-parser.add_argument('--intersections', type=str, help='contextual layers to intersect with admin area')
-parser.add_argument('--output_directory', type=str, help='path to output directory for tree_cover_loss_ha.csv and dissolved_intersection.shp')
+parser.add_argument('--shp', type=str, help='path to admin area shapefile')
+parser.add_argument('--thresh', type=int, help='percent threshold for tree cover loss')
+parser.add_argument('--layers', type=str, help='contextual layers to intersect with admin area, separated by commas')
+parser.add_argument('--dissolve', type=bool, help='True or False for dissolving shapefile intersection with contextual layers', default=True)
+parser.add_argument('--out', type=str, help='path to output directory', default='out')
 args = parser.parse_args()
-shp_fp = args.admin_area
-treecover_threshold = args.treecover_threshold
-contextual_layers = args.intersections.split(' ')
-OUT_DIR = args.output_directory
+shp_fp = args.shp
+treecover_threshold = args.thresh
+contextual_layers = args.layers.split(',')
+dissolve = args.dissolve
+OUT_DIR = args.out
 
 # create directories
 if not os.path.exists(OUT_DIR):
@@ -36,41 +38,58 @@ with fiona.open(shp_fp) as src:
     bounds = src.bounds
 X_list, Y_list = parse_bounds(bounds)
 
-def intersect_layers(layers, bounds, shp_fp):
-   
+def intersect_layers(layers, bounds, shp_fp, dissolve):
+
     # return dissolved shapefile if there are no contextual layers
     if len(contextual_layers) == 0:
         adm_shp = gpd.read_file(shp_fp)
-        dissolved = gpd.GeoSeries(adm_shp.geometry).unary_union
-        dissolved_gs = gpd.GeoSeries(dissolved)
-        dissolved_gs.to_file(os.path.join('tmp', 'dissolved_intersection.shp'))
-        
-        return dissolved
+        if dissolve==True:
+            dissolved = gpd.GeoSeries(adm_shp.geometry).unary_union
+            dissolved_gs = gpd.GeoSeries(dissolved)
+            dissolved_gs.to_file(os.path.join('tmp', f'{os.path.basename(shp_fp[:-4])}_tmp.shp'))
+            return dissolved
+        else:
+            adm_shp.to_file(os.path.join('tmp', f'{os.path.basename(shp_fp[:-4])}_tmp.shp'))
+            return adm_shp
+
     # parse for s3 paths
     s3_paths = [get_s3_asset_uri(layer) for layer in layers]
+
     # read contextual layers within bounds of admin area
     contextual_gdfs = []
     for s3_path in s3_paths:
+        if s3_path[-4:] == '.zip':
+            filename=f'zip+{s3_path}'
+        else:
+            filename=s3_path
         gdf = gpd.read_file(
-            filename=f'zip+{s3_path}',
-            bbox=bounds
+            filename=filename,
+            bbox=bounds,
         )
-        contextual_gdfs.append(gdf)
+        if len(gdf) > 0:
+            contextual_gdfs.append(gdf)
+        else:
+            continue
+
+    if len(contextual_gdfs) == 0:
+        raise NoIntersectException('Shapefile does not intersect with contextual layers')
+
     # intersect all layers
-    print('Intersecting contextual layer(s) and admin area')
     intersected_gdf = gpd.read_file(shp_fp)
     for contextual_gdf in contextual_gdfs:
         try:
             intersected_gdf = gpd.overlay(intersected_gdf, contextual_gdf, how='intersection')
         except:
             continue
-    # dissolve and save to tmp
-    print('Dissolving intersected features')
-    dissolved = gpd.GeoSeries(intersected_gdf.geometry).unary_union
-    dissolved_gs = gpd.GeoSeries(dissolved)
-    dissolved_gs.to_file(os.path.join('tmp', 'dissolved_intersection.shp'))
 
-    return dissolved
+    # dissolve and save to tmp
+    if dissolve==True:
+        dissolved = gpd.GeoSeries(intersected_gdf.geometry).unary_union
+        dissolved_gs = gpd.GeoSeries(dissolved)
+        dissolved_gs.to_file(os.path.join('tmp', f'{os.path.basename(shp_fp[:-4])}_tmp.shp'))
+        return dissolved_gs
+    else:
+        return intersected_gdf
 
 intersection = intersect_layers(contextual_layers, bounds, shp_fp)
 
@@ -89,6 +108,7 @@ for Y in Y_list:
             )
             tcd_arrs.append(src.read(1, window=window))
             win_affine = src.window_transform(window)
+            print(f'Extracted window for {Y}, {X}')
 
 # concatenate if multiple windows
 tcd_arr = concatenate_windows(tcd_arrs, X_list, Y_list)
@@ -113,6 +133,7 @@ for Y in Y_list:
                 src.transform
             ))
         area_arrs.append(area_arr)
+        print(f'Extracted window for {Y}, {X}')
 
 # concatenate if multiple windows
 area_arr = concatenate_windows(area_arrs, X_list, Y_list)
@@ -126,7 +147,7 @@ print('Extracting tree cover loss tile(s)')
 tcl_arrs = []
 for Y in Y_list:
     for X in X_list:
-        with rio.open(f's3://gfw-data-lake/umd_tree_cover_loss/v1.7/raster/epsg-4326/10/40000/year/geotiff/{Y}_{X}.tif') as src:
+        with rio.open(f's3://gfw-data-lake/umd_tree_cover_loss/v1.8/raster/epsg-4326/10/40000/year/geotiff/{Y}_{X}.tif') as src:
             tcl_arr = src.read(1, window=from_bounds(
                 bounds[0],
                 bounds[1],
@@ -136,6 +157,7 @@ for Y in Y_list:
         ))
 
         tcl_arrs.append(tcl_arr)
+        print(f'Extracted window for {Y}, {X}')
 
 # concatenate if multiple windows
 tcl_arr = concatenate_windows(tcl_arrs, X_list, Y_list)
@@ -147,7 +169,7 @@ tcl_masked = np.multiply(tcd_arr_mask, tcl_arr)
 # Compute zonal statistics for admin area
 print('Calculating tree cover loss in admin area per year')
 loss_by_year_ha = {}
-for year in tqdm(range(1,20)):
+for year in tqdm(range(1,21)):
     # copy thresholded tree cover loss array
     tcl_arr_year = tcl_masked.copy()
     # mask by current year
@@ -157,7 +179,7 @@ for year in tqdm(range(1,20)):
     tcl_arr_year_area = np.multiply(area_mask, tcl_arr_year) / 10000
     # compute zonal stats for admin area
     zstats = zonal_stats(
-        os.path.join('tmp', 'dissolved_intersection.shp'),
+        os.path.join('tmp', f'{os.path.basename(shp_fp[:-4])}_dissolved.shp'),
         tcl_arr_year_area,
         stats='sum',
         affine=win_affine,
@@ -165,19 +187,23 @@ for year in tqdm(range(1,20)):
         nodata=-999
     )
     # log
-    annual_loss = zstats[0]['sum']
+    annual_loss_df = pd.DataFrame(zstats)
+    annual_loss_df['year']=year+2000
+    annual_loss = annual_loss_df['sum'].sum()
     loss_by_year_ha[year + 2000] = annual_loss
+
+print(loss_by_year_ha)
 
 # load into DataFrame
 loss_df = pd.DataFrame.from_dict(loss_by_year_ha, orient='index')
 loss_df = loss_df.rename(columns={0:'area_ha'})
 loss_df['threshold'] = f'{treecover_threshold}%'
-print(loss_df)
+for i in range(len(contextual_layers)):
+    loss_df[f'intersection_{i+1}'] = contextual_layers[i]
 
 # save to CSV
 loss_df.to_csv(os.path.join(
     OUT_DIR,
-    f'{os.path.basename(shp_fp[:-4])}_tree_cover_loss_ha.csv'),
+    f'{os.path.basename(shp_fp[:-4])}__tree_cover_loss_ha__tcd{treecover_threshold}.csv'),
     index_label='year'
 )
-print(f'Saved to {OUT_DIR}/{os.path.basename(shp_fp[:-4])}_tree_cover_loss_ha.csv')

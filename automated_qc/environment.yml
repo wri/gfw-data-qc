@@ -18,4 +18,3 @@ dependencies:
   - ipywidgets
   - pip:
     - rasterstats
-prefix: /Users/mnukala.local/.conda/envs/automated-qc
