@@ -1,0 +1,20 @@
+name: automated-qc
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - fiona
+  - matplotlib
+  - pandas
+  - jupyterlab
+  - python=3.9
+  - pip
+  - numpy
+  - geopandas
+  - pyproj
+  - rasterio
+  - tqdm
+  - pygeos
+  - ipywidgets
+  - pip:
+    - rasterstats
