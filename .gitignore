@@ -1,1 +1,6 @@
 automated-qc/gcs_config.json
+shp/
+out/
+.DS_Store
+__pycache__/
+tmp/
